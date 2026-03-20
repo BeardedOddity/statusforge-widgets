@@ -1,4 +1,4 @@
-/* === WebSocket Receiver & Offline Engine (v2.0.0) === */
+/* === WebSocket Receiver & Offline Engine (v2.1.0) === */
 let lastGame = "";
 let sessionInterval;
 let widgetFadeTimer = null; 
@@ -53,42 +53,49 @@ function connectWebSocket() {
             if (data.event === "init" || data.event === "update") {
                 const scoutData = data.payload;
 
+                // 1. Handle the Session Timer
                 if (scoutData.is_playing) {
                     startTime = scoutData.start_time;
                     if (!sessionInterval) sessionInterval = setInterval(updateTimer, 1000);
-                    
-                    if (scoutData.game_title !== lastGame) {
-                        lastGame = scoutData.game_title;
-                        if (widgetFadeTimer) clearTimeout(widgetFadeTimer);
-                        if (w) w.style.opacity = "1";
-                        
-                        smoothTextUpdate("t", scoutData.game_title); 
-                        smoothTextUpdate("r", scoutData.release_date || "UNKNOWN");
-                        smoothTextUpdate("g", scoutData.genre || "GAMING");
-                        
-                        let studioText = scoutData.developer || "INDIE";
-                        if (scoutData.publisher && scoutData.publisher !== scoutData.developer) {
-                            studioText += ` / ${scoutData.publisher}`;
-                        }
-                        smoothTextUpdate("p", studioText); 
-                        
-                        applyCoverArt(scoutData.cover_url || '');
-                        if (w) resetFadeTimer(w, scoutData.fade_timer);
-                    }
-                    
-                    if (scoutData.last_pulse > lastKnownPulse) {
-                        lastKnownPulse = scoutData.last_pulse;
-                        if (widgetFadeTimer) clearTimeout(widgetFadeTimer);
-                        if (w) w.style.opacity = "1";
-                        if (w) resetFadeTimer(w, scoutData.fade_timer);
-                    }
-
                 } else {
-                    if (w) w.style.opacity = "0"; 
-                    lastGame = "";
+                    // If idle, stop the timer and reset text to zero
+                    startTime = 0;
                     clearInterval(sessionInterval);
                     sessionInterval = null;
+                    const el = document.getElementById("s"); 
+                    if (el) el.innerText = `⏱️ 00:00:00`;
+                }
+                
+                // 2. Treat Idle (Just Chatting) just like a real game to trigger the fade UI
+                if (scoutData.game_title !== lastGame) {
+                    lastGame = scoutData.game_title;
                     if (widgetFadeTimer) clearTimeout(widgetFadeTimer);
+                    
+                    // Wake up the widget!
+                    if (w) w.style.opacity = "1";
+                    
+                    smoothTextUpdate("t", scoutData.game_title); 
+                    smoothTextUpdate("r", scoutData.release_date || "UNKNOWN");
+                    smoothTextUpdate("g", scoutData.genre || "GAMING");
+                    
+                    let studioText = scoutData.developer || "INDIE";
+                    if (scoutData.publisher && scoutData.publisher !== scoutData.developer) {
+                        studioText += ` / ${scoutData.publisher}`;
+                    }
+                    smoothTextUpdate("p", studioText); 
+                    
+                    applyCoverArt(scoutData.cover_url || '');
+                    
+                    // Apply the normal fade out timer
+                    if (w) resetFadeTimer(w, scoutData.fade_timer);
+                }
+                
+                // 3. Handle manual pulse resets (lights up the widget again)
+                if (scoutData.last_pulse > lastKnownPulse) {
+                    lastKnownPulse = scoutData.last_pulse;
+                    if (widgetFadeTimer) clearTimeout(widgetFadeTimer);
+                    if (w) w.style.opacity = "1";
+                    if (w) resetFadeTimer(w, scoutData.fade_timer);
                 }
             }
         } catch (err) {
