@@ -1,5 +1,7 @@
-/* === WebSocket Receiver & Sentry Logic (v2.6.0) === */
+/* === WebSocket Receiver & Forge Architect Sync (v2.9.0) === */
 let lastGame = "";
+let lastCoverBase = ""; 
+let lastKnownPulse = 0; // The Forge Exception Tracker
 let sessionInterval;
 let widgetFadeTimer = null; 
 let startTime = 0;
@@ -13,7 +15,7 @@ const offlineBadge = document.getElementById('offline-badge');
 
 function showOffline(message) {
     if(offlineBadge) {
-        offlineBadge.innerHTML = `⚠️ ${message}`;
+        offlineBadge.innerHTML = `⚠️ StatusForge Offline`;
         offlineBadge.style.display = 'flex';
     }
     if(w) w.style.opacity = "0"; 
@@ -33,8 +35,32 @@ function connectWebSocket() {
                 const scoutData = data.payload;
                 const fadeSecs = parseInt(scoutData.fade_timer, 10) || 15;
                 const idleCategory = scoutData.idle_category || "Just Chatting";
+                
+                const incomingCoverBase = (scoutData.cover_url || "").split('?')[0];
+                const gameChanged = scoutData.game_title !== lastGame;
+                const coverChanged = incomingCoverBase !== lastCoverBase;
+                
+                // --- THE FORGE EXCEPTION ---
+                // If last_pulse is higher than what we know, a manual save occurred!
+                const pulseTriggered = scoutData.last_pulse > lastKnownPulse;
 
-                // 1. Session Timer (Purely visual)
+                if (gameChanged || coverChanged || pulseTriggered) {
+                    console.log(`[FORGE] Update Detected. Pulse: ${pulseTriggered}`);
+                    
+                    // 1. Force visual update
+                    updateUI(scoutData);
+                    
+                    // 2. If it's a new game OR a manual database update, wake the widget up
+                    if (gameChanged || pulseTriggered) {
+                        handleVisibility(scoutData.game_title, idleCategory, fadeSecs);
+                    }
+
+                    // 3. Commit state
+                    lastGame = scoutData.game_title;
+                    lastCoverBase = incomingCoverBase;
+                    lastKnownPulse = scoutData.last_pulse;
+                }
+
                 if (scoutData.is_playing) {
                     startTime = scoutData.start_time;
                     if (!sessionInterval) sessionInterval = setInterval(updateTimer, 1000);
@@ -43,38 +69,6 @@ function connectWebSocket() {
                     clearInterval(sessionInterval);
                     sessionInterval = null;
                 }
-
-                // 2. THE SENTRY CHECK: Only react if the title is actually DIFFERENT
-                if (scoutData.game_title !== lastGame) {
-                    console.log(`[SENTRY] State Change: ${lastGame} -> ${scoutData.game_title}`);
-                    lastGame = scoutData.game_title;
-
-                    // Update UI immediately
-                    updateUI(scoutData);
-
-                    // 3. FADE LOGIC
-                    if (scoutData.game_title === idleCategory) {
-                        // IDLE STATE: Stay visible forever
-                        if (widgetFadeTimer) {
-                            clearTimeout(widgetFadeTimer);
-                            widgetFadeTimer = null;
-                        }
-                        if (w) w.style.opacity = "1";
-                        console.log("[SENTRY] Idle state detected. Widget locked to VISIBLE.");
-                    } 
-                    else {
-                        // GAME STATE: Show then Fade
-                        if (w) w.style.opacity = "1";
-                        
-                        if (widgetFadeTimer) clearTimeout(widgetFadeTimer);
-                        
-                        console.log(`[SENTRY] Game detected. Fading in ${fadeSecs}s...`);
-                        widgetFadeTimer = setTimeout(() => {
-                            if (w) w.style.opacity = "0";
-                            console.log("[SENTRY] Fade complete.");
-                        }, fadeSecs * 1000);
-                    }
-                }
             }
         } catch (err) { console.error("Logic Error", err); }
     };
@@ -82,11 +76,26 @@ function connectWebSocket() {
     ws.onclose = () => { setTimeout(connectWebSocket, 5000); };
 }
 
+function handleVisibility(title, idle, fade) {
+    if (!w) return;
+    if (widgetFadeTimer) { clearTimeout(widgetFadeTimer); widgetFadeTimer = null; }
+
+    if (title === idle) {
+        w.style.opacity = "1";
+    } else {
+        w.style.opacity = "1";
+        widgetFadeTimer = setTimeout(() => {
+            w.style.opacity = "0";
+            console.log("[FORGE] Transition to sleep complete.");
+        }, fade * 1000);
+    }
+}
+
 function updateUI(scoutData) {
-    const ids = { t: 'game_title', r: 'release_date', g: 'genre' };
-    for (let id in ids) {
+    const fields = { t: 'game_title', r: 'release_date', g: 'genre' };
+    for (let id in fields) {
         const el = document.getElementById(id);
-        if (el) el.innerText = scoutData[ids[id]] || (id === 't' ? "" : "---");
+        if (el) el.innerText = scoutData[fields[id]] || (id === 't' ? "" : "---");
     }
     
     const p = document.getElementById('p');
@@ -94,23 +103,26 @@ function updateUI(scoutData) {
 
     const cover = document.getElementById('a');
     if (cover) {
-        cover.style.backgroundImage = scoutData.cover_url ? `url('${scoutData.cover_url}')` : 'none';
+        if (scoutData.cover_url) {
+            // Force browser to ignore cache for the updated database image
+            const freshUrl = scoutData.cover_url.split('?')[0] + '?v=' + Date.now();
+            cover.style.backgroundImage = `url('${freshUrl}')`;
+        } else {
+            cover.style.backgroundImage = 'none';
+        }
     }
     if (offlineBadge) offlineBadge.style.display = 'none';
 }
 
 function updateTimer() {
-    if (!startTime) {
-        const el = document.getElementById("s"); 
-        if (el) el.innerText = `⏱️ 00:00:00`;
-        return;
-    }
+    const el = document.getElementById("s"); 
+    if (!el) return;
+    if (!startTime) { el.innerText = `⏱️ 00:00:00`; return; }
     const diff = Math.floor(Date.now() / 1000) - Math.floor(startTime);
     const h = String(Math.floor(diff / 3600)).padStart(2, '0');
     const m = String(Math.floor((diff % 3600) / 60)).padStart(2, '0');
     const s = String(diff % 60).padStart(2, '0');
-    const el = document.getElementById("s"); 
-    if (el) el.innerText = `⏱️ ${h}:${m}:${s}`;
+    el.innerText = `⏱️ ${h}:${m}:${s}`;
 }
 
 connectWebSocket();
