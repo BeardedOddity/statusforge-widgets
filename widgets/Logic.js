@@ -1,5 +1,6 @@
-/* === WebSocket Receiver & Offline Engine (v2.1.0) === */
+/* === WebSocket Receiver & Offline Engine (v2.2.0) === */
 let lastGame = "";
+let lastCover = ""; // The new API Metadata Tracker
 let sessionInterval;
 let widgetFadeTimer = null; 
 let startTime = 0;
@@ -58,7 +59,6 @@ function connectWebSocket() {
                     startTime = scoutData.start_time;
                     if (!sessionInterval) sessionInterval = setInterval(updateTimer, 1000);
                 } else {
-                    // If idle, stop the timer and reset text to zero
                     startTime = 0;
                     clearInterval(sessionInterval);
                     sessionInterval = null;
@@ -66,9 +66,11 @@ function connectWebSocket() {
                     if (el) el.innerText = `⏱️ 00:00:00`;
                 }
                 
-                // 2. Treat Idle (Just Chatting) just like a real game to trigger the fade UI
-                if (scoutData.game_title !== lastGame) {
+                // 2. Trigger updates if the game changes OR if the delayed API cover art arrives
+                if (scoutData.game_title !== lastGame || scoutData.cover_url !== lastCover) {
                     lastGame = scoutData.game_title;
+                    lastCover = scoutData.cover_url;
+                    
                     if (widgetFadeTimer) clearTimeout(widgetFadeTimer);
                     
                     // Wake up the widget!
@@ -90,7 +92,7 @@ function connectWebSocket() {
                     if (w) resetFadeTimer(w, scoutData.fade_timer);
                 }
                 
-                // 3. Handle manual pulse resets (lights up the widget again)
+                // 3. Handle manual pulse resets
                 if (scoutData.last_pulse > lastKnownPulse) {
                     lastKnownPulse = scoutData.last_pulse;
                     if (widgetFadeTimer) clearTimeout(widgetFadeTimer);
@@ -107,6 +109,7 @@ function connectWebSocket() {
         console.log("WebSocket Disconnected. Engine Offline.");
         showOffline("StatusForge Offline");
         lastGame = ""; 
+        lastCover = ""; // Reset API tracker on disconnect
         clearInterval(sessionInterval);
         sessionInterval = null;
         setTimeout(connectWebSocket, 5000);
@@ -126,6 +129,10 @@ function resetFadeTimer(widgetElement, fadeTimerSettings) {
 function smoothTextUpdate(id, text) {
     const el = document.getElementById(id);
     if(!el) return;
+    
+    // SMART ANTI-FLICKER: Don't animate if the text is exactly the same
+    if(el.innerText === text) return; 
+    
     el.style.opacity = 0;
     setTimeout(() => { el.innerText = text; el.style.opacity = 1; }, 500); 
 }
