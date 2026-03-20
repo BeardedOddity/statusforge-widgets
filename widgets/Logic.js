@@ -1,6 +1,6 @@
-/* === WebSocket Receiver & Offline Engine (v2.2.1) === */
+/* === WebSocket Receiver & Offline Engine (v2.3.0) === */
 let lastGame = "";
-let lastCover = ""; // The API Metadata Tracker
+let lastCover = ""; 
 let sessionInterval;
 let widgetFadeTimer = null; 
 let startTime = 0;
@@ -36,25 +36,25 @@ function connectWebSocket() {
 
     ws = new WebSocket(`ws://127.0.0.1:5050/ws?token=${widgetToken}`);
 
-    ws.onopen = () => {
-        console.log("WebSocket Connected to StatusForge Engine.");
-        showOnline();
-    };
+    ws.onopen = () => { showOnline(); };
 
     ws.onmessage = (event) => {
         try {
             const data = JSON.parse(event.data);
 
             if (data.event === "error") {
-                showOffline("Security Lockout (Bad Token)");
+                showOffline("Security Lockout");
                 ws.close();
                 return;
             }
 
             if (data.event === "init" || data.event === "update") {
                 const scoutData = data.payload;
+                
+                // STRICT TYPE PARSING: Force the timer to be a real number
+                const fadeSecs = parseInt(scoutData.fade_timer, 10) || 0;
 
-                // 1. Handle the Session Timer
+                // 1. Session Timer
                 if (scoutData.is_playing) {
                     startTime = scoutData.start_time;
                     if (!sessionInterval) sessionInterval = setInterval(updateTimer, 1000);
@@ -66,18 +66,16 @@ function connectWebSocket() {
                     if (el) el.innerText = `⏱️ 00:00:00`;
                 }
                 
-                // --- THE FIX: Strip cache-busters (?) so the tracker doesn't get confused ---
                 const currentCoverBase = (scoutData.cover_url || "").split('?')[0];
                 const lastCoverBase = (lastCover || "").split('?')[0];
                 
-                // 2. Trigger updates ONLY if the title changes or the raw image file changes
+                // 2. Trigger updates ONLY if the title or raw image changes
                 if (scoutData.game_title !== lastGame || currentCoverBase !== lastCoverBase) {
                     lastGame = scoutData.game_title;
-                    lastCover = scoutData.cover_url; // Store the full URL to apply it
+                    lastCover = scoutData.cover_url; 
                     
                     if (widgetFadeTimer) clearTimeout(widgetFadeTimer);
                     
-                    // Wake up the widget!
                     if (w) w.style.opacity = "1";
                     
                     smoothTextUpdate("t", scoutData.game_title); 
@@ -92,25 +90,24 @@ function connectWebSocket() {
                     
                     applyCoverArt(scoutData.cover_url || '');
                     
-                    // Apply the normal fade out timer so it goes back to sleep
-                    if (w) resetFadeTimer(w, scoutData.fade_timer);
+                    // Send strictly parsed number to the fade function
+                    if (w) resetFadeTimer(w, fadeSecs);
                 }
                 
-                // 3. Handle manual pulse resets
-                if (scoutData.last_pulse > lastKnownPulse) {
+                // 3. Pulse check (Ignores minor millisecond changes to prevent runaway loops)
+                if (scoutData.last_pulse && (scoutData.last_pulse - lastKnownPulse > 1)) {
                     lastKnownPulse = scoutData.last_pulse;
                     if (widgetFadeTimer) clearTimeout(widgetFadeTimer);
                     if (w) w.style.opacity = "1";
-                    if (w) resetFadeTimer(w, scoutData.fade_timer);
+                    if (w) resetFadeTimer(w, fadeSecs);
                 }
             }
         } catch (err) {
-            console.error("Failed to parse WebSocket message", err);
+            console.error("Failed to parse", err);
         }
     };
 
     ws.onclose = () => {
-        console.log("WebSocket Disconnected. Engine Offline.");
         showOffline("StatusForge Offline");
         lastGame = ""; 
         lastCover = ""; 
@@ -118,8 +115,6 @@ function connectWebSocket() {
         sessionInterval = null;
         setTimeout(connectWebSocket, 5000);
     };
-
-    ws.onerror = (error) => { console.error("WebSocket Error:", error); };
 }
 
 function resetFadeTimer(widgetElement, fadeTimerSettings) {
@@ -127,14 +122,13 @@ function resetFadeTimer(widgetElement, fadeTimerSettings) {
         widgetFadeTimer = setTimeout(() => {
             widgetElement.style.opacity = "0";
         }, fadeTimerSettings * 1000);
-    }
+    } 
 }
 
 function smoothTextUpdate(id, text) {
     const el = document.getElementById(id);
     if(!el) return;
     if(el.innerText === text) return; 
-    
     el.style.opacity = 0;
     setTimeout(() => { el.innerText = text; el.style.opacity = 1; }, 500); 
 }
