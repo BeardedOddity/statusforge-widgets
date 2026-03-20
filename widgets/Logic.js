@@ -1,6 +1,6 @@
-/* === WebSocket Receiver & Offline Engine (v2.2.0) === */
+/* === WebSocket Receiver & Offline Engine (v2.2.1) === */
 let lastGame = "";
-let lastCover = ""; // The new API Metadata Tracker
+let lastCover = ""; // The API Metadata Tracker
 let sessionInterval;
 let widgetFadeTimer = null; 
 let startTime = 0;
@@ -66,10 +66,14 @@ function connectWebSocket() {
                     if (el) el.innerText = `⏱️ 00:00:00`;
                 }
                 
-                // 2. Trigger updates if the game changes OR if the delayed API cover art arrives
-                if (scoutData.game_title !== lastGame || scoutData.cover_url !== lastCover) {
+                // --- THE FIX: Strip cache-busters (?) so the tracker doesn't get confused ---
+                const currentCoverBase = (scoutData.cover_url || "").split('?')[0];
+                const lastCoverBase = (lastCover || "").split('?')[0];
+                
+                // 2. Trigger updates ONLY if the title changes or the raw image file changes
+                if (scoutData.game_title !== lastGame || currentCoverBase !== lastCoverBase) {
                     lastGame = scoutData.game_title;
-                    lastCover = scoutData.cover_url;
+                    lastCover = scoutData.cover_url; // Store the full URL to apply it
                     
                     if (widgetFadeTimer) clearTimeout(widgetFadeTimer);
                     
@@ -88,7 +92,7 @@ function connectWebSocket() {
                     
                     applyCoverArt(scoutData.cover_url || '');
                     
-                    // Apply the normal fade out timer
+                    // Apply the normal fade out timer so it goes back to sleep
                     if (w) resetFadeTimer(w, scoutData.fade_timer);
                 }
                 
@@ -109,7 +113,7 @@ function connectWebSocket() {
         console.log("WebSocket Disconnected. Engine Offline.");
         showOffline("StatusForge Offline");
         lastGame = ""; 
-        lastCover = ""; // Reset API tracker on disconnect
+        lastCover = ""; 
         clearInterval(sessionInterval);
         sessionInterval = null;
         setTimeout(connectWebSocket, 5000);
@@ -129,8 +133,6 @@ function resetFadeTimer(widgetElement, fadeTimerSettings) {
 function smoothTextUpdate(id, text) {
     const el = document.getElementById(id);
     if(!el) return;
-    
-    // SMART ANTI-FLICKER: Don't animate if the text is exactly the same
     if(el.innerText === text) return; 
     
     el.style.opacity = 0;
