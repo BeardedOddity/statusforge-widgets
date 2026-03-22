@@ -25,7 +25,7 @@ function connectWebSocket() {
     if (!widgetToken) return;
 
     // HARDCODED PLAIN WS:// CONNECTION - Do not use window.location.protocol!
-    ws = new WebSocket(`ws://127.0.0.1:5050/ws?token=${widgetToken}`);
+    ws = new WebSocket(`ws://127.0.0.1:53735/ws?token=${widgetToken}`);
 
     ws.onmessage = (event) => {
         try {
